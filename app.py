@@ -191,24 +191,53 @@ def sidebar(user: auth.AuthUser, predictor, model_error) -> str:
     return page
 
 
-def render_result(scan: db.Scan, patient: db.Patient) -> None:
-    """The screening result card. Reused by history in M6."""
-    is_pn = scan.predicted_label == predict.PNEUMONIA
+def render_result(scan: db.Scan, patient: db.Patient, label: str, confidence: float) -> None:
+    """The screening result card, for the label at the CURRENTLY displayed threshold."""
+    is_pn = label == predict.PNEUMONIA
     css = "pneumonia" if is_pn else "normal"
     headline = "Findings suggest pneumonia" if is_pn else "No pneumonia pattern detected"
-    sub = (f"Screening result: likely <b>{scan.predicted_label}</b> · "
+    sub = (f"Screening result: likely <b>{label}</b> · "
            f"{escape(patient.name)} · {fmt_dt(scan.created_at)}")
     st.markdown(
         f'<div class="result {css}"><div class="kicker">Screening result</div>'
         f'<div class="headline">{headline}</div><div class="sub">{sub}</div></div>',
         unsafe_allow_html=True,
     )
-    st.progress(scan.confidence, text=f"Confidence in this result: {scan.confidence:.0%}")
-    st.caption(
-        f"Model pneumonia probability p = {scan.pneumonia_prob:.3f} · "
-        f"threshold used = {scan.threshold_used:.2f} (PNEUMONIA if p ≥ threshold). "
-        "Result saved."
+    st.progress(confidence, text=f"Confidence in this result: {confidence:.0%}")
+    if confidence < 0.5:
+        # Threshold moved past p: the label comes from the cutoff, not the model's lean.
+        st.warning("The model itself leans the other way here; this label comes from "
+                   "the threshold setting. Treat it as borderline.")
+
+
+def _save_threshold(user_id: int, scan_id: int) -> None:
+    """Button callback (runs before the rerun, so the page reflects the save)."""
+    thr = st.session_state[f"thr_{scan_id}"]
+    db.update_scan_threshold(user_id, scan_id, thr)
+    st.toast(f"Saved threshold {thr:.2f} with this scan.")
+
+
+def render_threshold_control(scan: db.Scan, threshold: float) -> None:
+    st.slider(
+        "Confidence threshold", 0.0, 1.0, float(scan.threshold_used), 0.01,
+        key=f"thr_{scan.id}",
+        help="PNEUMONIA is shown when the model's probability p ≥ this threshold.",
     )
+    st.caption(
+        "Lowering the threshold catches more pneumonia but raises more false alarms; "
+        "raising it is stricter but misses more cases. This changes how the result is "
+        "**displayed** — it does not change the model or its probability."
+    )
+    st.caption(f"Model pneumonia probability p = {scan.pneumonia_prob:.3f} · "
+               f"saved threshold = {scan.threshold_used:.2f}")
+    if abs(threshold - scan.threshold_used) > 1e-9:
+        c_note, c_btn = st.columns([2, 1])
+        c_note.info(f"Showing threshold {threshold:.2f} — not saved "
+                    f"(saved: {scan.threshold_used:.2f}).")
+        c_btn.button("Save threshold", key=f"save_thr_{scan.id}", width="stretch",
+                     on_click=_save_threshold, args=(scan.user_id, scan.id))
+    else:
+        st.caption("✓ Result saved at this threshold.")
 
 
 def display_size(img: Image.Image) -> Image.Image:
@@ -230,7 +259,16 @@ def cached_heatmap(image_rel: str, target_label: str) -> np.ndarray:
 def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
     """Full result screen for one saved scan: result card + explanations.
     Used right after analysis and (M6) when reopening from history."""
-    render_result(scan, patient)
+    # The slider is drawn below the card but read here first via session_state,
+    # so moving it updates the label, confidence and Grad-CAM target in one rerun.
+    threshold = st.session_state.get(f"thr_{scan.id}", scan.threshold_used)
+    label, confidence = predict.classify(scan.pneumonia_prob, threshold)
+
+    c_card, c_thr = st.columns([1.3, 1], gap="large")
+    with c_card:
+        render_result(scan, patient, label, confidence)
+    with c_thr:
+        render_threshold_control(scan, threshold)
 
     st.subheader("What drove this result")
     original = display_size(storage.open_image(scan.image_path))
@@ -240,14 +278,14 @@ def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
     with c_cam:
         try:
             with st.spinner("Computing Grad-CAM…"):
-                heatmap = cached_heatmap(scan.image_path, scan.predicted_label)
+                heatmap = cached_heatmap(scan.image_path, label)
         except Exception:  # noqa: BLE001 — show an honest error, never a fake map
             st.error("Grad-CAM could not be computed for this image.")
         else:
             opacity = st.session_state.get(f"opacity_{scan.id}", config.DEFAULT_OPACITY)
             demo = " — DEMO: untrained stand-in network, meaningless" if predictor.is_demo else ""
             st.image(gradcam.overlay(original, heatmap, opacity),
-                     caption=f"Grad-CAM for “{scan.predicted_label}”{demo}", width="stretch")
+                     caption=f"Grad-CAM for “{label}”{demo}", width="stretch")
             if heatmap.max() == 0:
                 st.warning("Grad-CAM found no region pushing towards this result.")
         # Rendered below the image but read above via session_state, so a slider

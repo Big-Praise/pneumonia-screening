@@ -101,6 +101,24 @@ def test_patients_and_scans_scoped_to_owner():
     assert db.count_for_user(a.id) == (1, 1)
 
 
+def test_update_threshold_recomputes_label_and_is_scoped():
+    a = auth.register_user("dr.a", "password-a")
+    b = auth.register_user("dr.b", "password-b")
+    pa = db.create_patient(a.id, "Test Patient A")
+    scan = db.create_scan(a.id, pa.id, "x.png", "PNEUMONIA", 0.6, 0.6, 0.5)
+
+    updated = db.update_scan_threshold(a.id, scan.id, 0.7)  # p=0.6 < 0.7 -> NORMAL
+    assert (updated.predicted_label, updated.threshold_used) == ("NORMAL", 0.7)
+    assert updated.confidence == pytest.approx(0.4)
+    s, _ = db.get_scan(a.id, scan.id)
+    assert (s.predicted_label, s.threshold_used, s.pneumonia_prob) == ("NORMAL", 0.7, 0.6)
+
+    with pytest.raises(db.NotFound):
+        db.update_scan_threshold(b.id, scan.id, 0.3)
+    with pytest.raises(ValueError):
+        db.update_scan_threshold(a.id, scan.id, 1.5)
+
+
 def test_patient_validation():
     a = auth.register_user("dr.a", "password-a")
     with pytest.raises(ValueError):

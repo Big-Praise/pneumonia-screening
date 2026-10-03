@@ -177,6 +177,23 @@ def create_scan(user_id: int, patient_id: int, image_path: str, predicted_label:
         return scan
 
 
+def update_scan_threshold(user_id: int, scan_id: int, threshold: float) -> Scan:
+    """Re-save a scan at a new threshold. Label and confidence are recomputed from
+    the stored pneumonia_prob so the row can never disagree with itself."""
+    from predict import classify  # pure function; local import keeps db free of ML deps at load
+
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("Threshold must be between 0 and 1.")
+    with get_session() as s:
+        scan = s.get(Scan, scan_id)
+        if scan is None or scan.user_id != user_id:
+            raise NotFound("Scan not found.")
+        scan.predicted_label, scan.confidence = classify(scan.pneumonia_prob, threshold)
+        scan.threshold_used = threshold
+        s.flush()
+        return scan
+
+
 def get_scan(user_id: int, scan_id: int) -> tuple[Scan, Patient]:
     with get_session() as s:
         row = s.execute(
