@@ -15,6 +15,7 @@ import auth
 import config
 import db
 import gradcam
+import lime_explain
 import model_loader
 import predict
 import storage
@@ -271,8 +272,12 @@ def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
         render_threshold_control(scan, threshold)
 
     st.subheader("What drove this result")
+    st.caption("Two independent explanations; agreement increases confidence in the "
+               "highlighted region.")
     original = display_size(storage.open_image(scan.image_path))
-    c_orig, c_cam = st.columns(2, gap="medium")
+    demo = " — DEMO: meaningless" if predictor.is_demo else ""
+    heatmap = None
+    c_orig, c_cam, c_lime = st.columns(3, gap="medium")
     with c_orig:
         st.image(original, caption="Original X-ray", width="stretch")
     with c_cam:
@@ -283,7 +288,6 @@ def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
             st.error("Grad-CAM could not be computed for this image.")
         else:
             opacity = st.session_state.get(f"opacity_{scan.id}", config.DEFAULT_OPACITY)
-            demo = " — DEMO: untrained stand-in network, meaningless" if predictor.is_demo else ""
             st.image(gradcam.overlay(original, heatmap, opacity),
                      caption=f"Grad-CAM for “{label}”{demo}", width="stretch")
             if heatmap.max() == 0:
@@ -293,12 +297,52 @@ def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
         st.slider("Heatmap opacity", 0.0, 1.0, config.DEFAULT_OPACITY, 0.05,
                   key=f"opacity_{scan.id}",
                   help="Fade the heatmap to see the anatomy underneath. Display only.")
+    with c_lime:
+        render_lime(scan, label, original, heatmap, predictor, demo)
     st.caption(
-        "Red = regions that most pushed the model towards this result. Grad-CAM is "
-        "computed on a coarse 7×7 grid and upsampled, so it shows broad regions, not "
-        "lesion boundaries. Highlights outside the lungs suggest the model may be "
-        "using non-clinical cues — interpret with care."
+        "**Grad-CAM** (left): red = regions that most pushed the model towards this "
+        "result; computed on a coarse 7×7 grid, so broad regions, not lesion boundaries. "
+        "**LIME** (right): green = the superpixels whose removal most weakened this "
+        "result. Highlights outside the lungs suggest the model may be using "
+        "non-clinical cues — interpret with care."
     )
+
+
+def render_lime(scan: db.Scan, label: str, original: Image.Image, heatmap, predictor,
+                demo: str) -> None:
+    """LIME column: on request only (slow), then cached on disk per scan."""
+    cached = lime_explain.load_cached(scan.image_path)
+    show = st.toggle("Show LIME explanation", key=f"lime_{scan.id}", value=cached is not None)
+    if not show:
+        st.caption(f"LIME re-runs the model on {config.LIME_NUM_SAMPLES:,} altered copies "
+                   "of the image — about a minute. Results are saved, so each scan "
+                   "only runs once.")
+        return
+    if cached is None:
+        with st.spinner(f"Running LIME on {config.LIME_NUM_SAMPLES:,} perturbed images "
+                        "(about a minute)…"):
+            try:
+                img = storage.open_image(scan.image_path)
+                cached = lime_explain.compute(predictor, img)
+                lime_explain.save_cached(scan.image_path, cached)
+            except Exception:  # noqa: BLE001 — honest error, no fabricated regions
+                st.error("LIME could not be computed for this image.")
+                return
+    mask = lime_explain.mask_for(cached, label)
+    st.image(lime_explain.overlay(original, mask), width="stretch",
+             caption=f"LIME for “{label}” — top {lime_explain.TOP_FEATURES} regions{demo}")
+    if not mask.any():
+        st.warning("LIME found no region supporting this result.")
+        return
+    if lime_explain.top_weight(cached, label) < lime_explain.WEAK_WEIGHT:
+        st.caption("⚠️ Weak evidence: hiding any single region barely changes the "
+                   "prediction, so these highlights are only loosely supported.")
+    if heatmap is not None:
+        agree = lime_explain.agreement(heatmap, mask)
+        if agree is not None:
+            word = "high" if agree >= 0.5 else "partial" if agree >= 0.2 else "low"
+            st.caption(f"Agreement with Grad-CAM: **{word}** ({agree:.0%} of LIME's "
+                       "regions fall in Grad-CAM's hottest area).")
 
 
 # ---------------------------------------------------------------------- pages

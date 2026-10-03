@@ -40,14 +40,23 @@ class KerasPredictor:
         self.keras_model(tf.zeros((1, 224, 224, 3)))
         self.source = path.name
 
+        # Compiled graph for batch inference (LIME runs ~1000 images). Measured ~2x
+        # faster than model.predict() on CPU. input_signature with a free batch
+        # dimension avoids retracing for the smaller last batch.
+        model = self.keras_model
+
+        @tf.function(input_signature=[tf.TensorSpec([None, 224, 224, 3], tf.float32)])
+        def _infer(x):
+            return model(x, training=False)
+
+        self._infer = _infer
+
     def predict_prob(self, batch: np.ndarray) -> np.ndarray:
         batch = np.asarray(batch, dtype="float32")
-        if len(batch) <= 8:
-            # Direct call avoids predict()'s per-call setup overhead for single images.
-            out = self.keras_model(batch, training=False)
-        else:
-            out = self.keras_model.predict(batch, batch_size=32, verbose=0)
-        return np.asarray(out, dtype=float).reshape(-1)
+        out = [np.asarray(self._infer(batch[i:i + self.BATCH])) for i in range(0, len(batch), self.BATCH)]
+        return np.concatenate(out).astype(float).reshape(-1)
+
+    BATCH = 64
 
 
 def find_model_file() -> Path | None:
