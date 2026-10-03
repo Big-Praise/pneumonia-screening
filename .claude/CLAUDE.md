@@ -27,9 +27,11 @@ Decision-support, NOT diagnosis.
 - If real model absent -> mock + DEMO MODE banner; swap is one line.
 
 ## Stack
-Path A default: Streamlit + SQLite + SQLAlchemy + passlib/bcrypt;
-TensorFlow/Keras + Pillow + OpenCV (Grad-CAM); lime + scikit-image (LIME);
-reportlab (PDF). Confirm Path A vs B before building. See docs/TECH_STACK.md.
+Path A (confirmed): Streamlit + SQLite + SQLAlchemy + bcrypt (direct, not passlib);
+TensorFlow 2.20.0 / Keras 3.13.2 (pinned = training env) + Pillow + OpenCV
+(Grad-CAM); lime + scikit-image (LIME); reportlab (PDF). Python 3.13 `.venv`.
+Approved deviations: Scan.pneumonia_prob column; clinicians see only their own
+patients; registration gated by REGISTRATION_CODE; uploads re-encoded to UUID PNGs.
 
 ## Workflow
 - Summarise the plan + any pushback before coding; wait for confirmation.
@@ -40,7 +42,9 @@ reportlab (PDF). Confirm Path A vs B before building. See docs/TECH_STACK.md.
   and wants pushback, not blind agreement.
 
 ## Commands
-- Run: `streamlit run app.py`   • Install: `pip install -r requirements.txt`
+- Run: `.venv/Scripts/python -m streamlit run app.py`
+- Install: `.venv/Scripts/python -m pip install -r requirements.txt`
+- Test: `.venv/Scripts/python -m pytest -q tests`
 
 ## When corrected
 Add a one-line rule here so it isn't repeated.

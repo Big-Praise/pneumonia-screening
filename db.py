@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event,
+    DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event, func, select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -120,3 +120,86 @@ def get_session():
         raise
     finally:
         session.close()
+
+
+# ------------------------------------------------------------------ queries
+# Every query takes the user id and filters on it: a clinician only ever sees
+# their own patients and scans (approved scoping decision).
+
+class NotFound(LookupError):
+    """Record missing or not owned by this user (deliberately indistinguishable)."""
+
+
+def as_utc(dt: datetime) -> datetime:
+    """SQLite drops tzinfo on read; values are always stored as UTC."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def create_patient(user_id: int, name: str, age: int | None = None,
+                   sex: str | None = None, note: str | None = None) -> Patient:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Patient name is required.")
+    if age is not None and not 0 <= age <= 130:
+        raise ValueError("Age must be between 0 and 130.")
+    with get_session() as s:
+        p = Patient(name=name, age=age, sex=sex or None,
+                    note=(note or "").strip() or None, created_by=user_id)
+        s.add(p)
+        s.flush()
+        return p
+
+
+def list_patients(user_id: int) -> list[Patient]:
+    with get_session() as s:
+        return list(s.scalars(
+            select(Patient).where(Patient.created_by == user_id).order_by(Patient.name)
+        ))
+
+
+def get_patient(user_id: int, patient_id: int) -> Patient:
+    with get_session() as s:
+        p = s.get(Patient, patient_id)
+        if p is None or p.created_by != user_id:
+            raise NotFound("Patient not found.")
+        return p
+
+
+def create_scan(user_id: int, patient_id: int, image_path: str, predicted_label: str,
+                confidence: float, pneumonia_prob: float, threshold_used: float) -> Scan:
+    get_patient(user_id, patient_id)  # ownership check before writing
+    with get_session() as s:
+        scan = Scan(patient_id=patient_id, user_id=user_id, image_path=image_path,
+                    predicted_label=predicted_label, confidence=confidence,
+                    pneumonia_prob=pneumonia_prob, threshold_used=threshold_used)
+        s.add(scan)
+        s.flush()
+        return scan
+
+
+def get_scan(user_id: int, scan_id: int) -> tuple[Scan, Patient]:
+    with get_session() as s:
+        row = s.execute(
+            select(Scan, Patient).join(Patient, Scan.patient_id == Patient.id)
+            .where(Scan.id == scan_id, Scan.user_id == user_id)
+        ).first()
+        if row is None:
+            raise NotFound("Scan not found.")
+        return row[0], row[1]
+
+
+def recent_scans(user_id: int, limit: int = 10) -> list[tuple[Scan, Patient]]:
+    with get_session() as s:
+        rows = s.execute(
+            select(Scan, Patient).join(Patient, Scan.patient_id == Patient.id)
+            .where(Scan.user_id == user_id)
+            .order_by(Scan.created_at.desc(), Scan.id.desc()).limit(limit)
+        ).all()
+        return [(r[0], r[1]) for r in rows]
+
+
+def count_for_user(user_id: int) -> tuple[int, int]:
+    with get_session() as s:
+        n_p = s.scalar(select(func.count(Patient.id)).where(Patient.created_by == user_id))
+        n_s = s.scalar(select(func.count(Scan.id)).where(Scan.user_id == user_id))
+        return n_p, n_s
