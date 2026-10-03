@@ -7,11 +7,14 @@ always-on disclaimer are enforced in exactly one place (main()).
 """
 from html import escape
 
+import numpy as np
 import streamlit as st
+from PIL import Image
 
 import auth
 import config
 import db
+import gradcam
 import model_loader
 import predict
 import storage
@@ -58,6 +61,7 @@ CSS = """
 
 PAGES = ["Dashboard", "New Scan", "Patients"]
 SEX_OPTIONS = ["", "Female", "Male", "Other"]
+DISPLAY_MAX_PX = 640
 
 
 # ------------------------------------------------------------------ resources
@@ -207,6 +211,58 @@ def render_result(scan: db.Scan, patient: db.Patient) -> None:
     )
 
 
+def display_size(img: Image.Image) -> Image.Image:
+    """Downscale for screen so overlays re-blend instantly when sliders move."""
+    img = img.copy()
+    img.thumbnail((DISPLAY_MAX_PX, DISPLAY_MAX_PX))
+    return img
+
+
+@st.cache_data(max_entries=64, show_spinner=False)
+def cached_heatmap(image_rel: str, target_label: str) -> np.ndarray:
+    """Grad-CAM per (stored image, label). Stored images never change, so the
+    path is a safe cache key; switching scans or labels recomputes once."""
+    predictor, _ = get_predictor()
+    x = predict.preprocess(storage.open_image(image_rel))
+    return gradcam.compute_heatmap(predictor.keras_model, x, target_label)
+
+
+def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
+    """Full result screen for one saved scan: result card + explanations.
+    Used right after analysis and (M6) when reopening from history."""
+    render_result(scan, patient)
+
+    st.subheader("What drove this result")
+    original = display_size(storage.open_image(scan.image_path))
+    c_orig, c_cam = st.columns(2, gap="medium")
+    with c_orig:
+        st.image(original, caption="Original X-ray", width="stretch")
+    with c_cam:
+        try:
+            with st.spinner("Computing Grad-CAM…"):
+                heatmap = cached_heatmap(scan.image_path, scan.predicted_label)
+        except Exception:  # noqa: BLE001 — show an honest error, never a fake map
+            st.error("Grad-CAM could not be computed for this image.")
+        else:
+            opacity = st.session_state.get(f"opacity_{scan.id}", config.DEFAULT_OPACITY)
+            demo = " — DEMO: untrained stand-in network, meaningless" if predictor.is_demo else ""
+            st.image(gradcam.overlay(original, heatmap, opacity),
+                     caption=f"Grad-CAM for “{scan.predicted_label}”{demo}", width="stretch")
+            if heatmap.max() == 0:
+                st.warning("Grad-CAM found no region pushing towards this result.")
+        # Rendered below the image but read above via session_state, so a slider
+        # move re-blends the cached heatmap without recomputing Grad-CAM.
+        st.slider("Heatmap opacity", 0.0, 1.0, config.DEFAULT_OPACITY, 0.05,
+                  key=f"opacity_{scan.id}",
+                  help="Fade the heatmap to see the anatomy underneath. Display only.")
+    st.caption(
+        "Red = regions that most pushed the model towards this result. Grad-CAM is "
+        "computed on a coarse 7×7 grid and upsampled, so it shows broad regions, not "
+        "lesion boundaries. Highlights outside the lungs suggest the model may be "
+        "using non-clinical cues — interpret with care."
+    )
+
+
 # ---------------------------------------------------------------------- pages
 
 def dashboard(user: auth.AuthUser) -> None:
@@ -309,17 +365,29 @@ def new_scan_page(user: auth.AuthUser, predictor, model_error) -> None:
         st.error(str(e))
         return
 
-    col_img, col_res = st.columns([1, 1.2], gap="large")
-    with col_img:
-        st.image(img, caption="Uploaded X-ray", width="stretch")
+    if model_error:
+        st.error("The screening model could not be loaded, so no result can be "
+                 f"produced. Details: {model_error}")
+        return
 
-    with col_res:
-        if model_error:
-            st.error("The screening model could not be loaded, so no result can be "
-                     f"produced. Details: {model_error}")
-            return
-        if st.button("Analyze", type="primary", width="stretch",
-                     disabled="last_scan_id" in st.session_state):
+    # After analysis: the full result view replaces the preview.
+    if "last_scan_id" in st.session_state:
+        try:
+            scan, patient = db.get_scan(user.id, st.session_state.last_scan_id)
+        except db.NotFound:
+            _clear_result()
+            st.rerun()
+        st.divider()
+        render_scan_view(scan, patient, predictor)
+        return
+
+    col_img, col_act = st.columns([1, 1.2], gap="large")
+    with col_img:
+        st.image(display_size(img), caption="Uploaded X-ray", width="stretch")
+    with col_act:
+        st.write("Check this is the right patient and image, then analyze. "
+                 "The result is saved automatically.")
+        if st.button("Analyze", type="primary", width="stretch"):
             with st.spinner("Analyzing X-ray…"):
                 try:
                     p = predict.pneumonia_probability(predictor, img)
@@ -331,20 +399,12 @@ def new_scan_page(user: auth.AuthUser, predictor, model_error) -> None:
                 try:
                     scan = db.create_scan(user.id, patient_id, rel, label, conf, p,
                                           config.DEFAULT_THRESHOLD)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     storage.image_path(rel).unlink(missing_ok=True)  # no orphan files
                     st.error("Could not save the result. Please try again.")
                     return
             st.session_state.last_scan_id = scan.id
-
-        if "last_scan_id" in st.session_state:
-            try:
-                scan, patient = db.get_scan(user.id, st.session_state.last_scan_id)
-            except db.NotFound:
-                _clear_result()
-                return
-            render_result(scan, patient)
-            st.caption("Grad-CAM heatmap and sliders arrive in M3–M4.")
+            st.rerun()  # switch to the result layout
 
 
 def main() -> None:
