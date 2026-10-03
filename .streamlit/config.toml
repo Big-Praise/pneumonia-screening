@@ -1,0 +1,18 @@
+[theme]
+base = "light"
+primaryColor = "#0f766e"
+backgroundColor = "#f7faf9"
+secondaryBackgroundColor = "#e8f1ef"
+textColor = "#12302c"
+font = "sans serif"
+
+[server]
+# Only reachable from this machine (patient data stays local).
+# TODO (Praise): change/override when deploying behind proper HTTPS + hosting.
+address = "localhost"
+# Matches config.MAX_UPLOAD_MB; Streamlit rejects larger files before our code runs.
+maxUploadSize = 10
+
+[browser]
+# Keep everything local — no usage telemetry leaves the machine.
+gatherUsageStats = false

@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime data — patient records and images never go into git.
+app.db
+uploads/*
+!uploads/.gitkeep
+
+# Model artifact is supplied separately.
+pneumonia_model.keras
+pneumonia_model.h5
+
+.env
+.streamlit/secrets.toml
