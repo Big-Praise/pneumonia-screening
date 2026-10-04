@@ -5,6 +5,8 @@ modules so they stay testable without Streamlit. Routing is a simple
 session_state key rather than Streamlit multipage, so the login gate and the
 always-on disclaimer are enforced in exactly one place (main()).
 """
+import logging
+import time
 from datetime import datetime
 from functools import partial
 from html import escape
@@ -62,6 +64,8 @@ CSS = """
   .result .sub { color: #33504b; }
 </style>
 """
+
+log = logging.getLogger("screening")
 
 PAGES = ["Dashboard", "New Scan", "Patients"]
 SEX_OPTIONS = ["", "Female", "Male", "Other"]
@@ -129,8 +133,15 @@ def login_screen() -> None:
                 submitted = st.form_submit_button("Log in", type="primary",
                                                   width="stretch")
             if submitted:
+                # Slow repeated failures in this browser session. Real brute-force
+                # protection belongs at the hosting layer (per-IP rate limiting).
+                # TODO (Praise): add rate limiting in your reverse proxy/host when deploying.
+                fails = st.session_state.get("login_failures", 0)
+                if fails >= 3:
+                    time.sleep(min(2 ** (fails - 3), 8))
                 user = auth.authenticate(username, password)
                 if user is None:
+                    st.session_state.login_failures = fails + 1
                     # Same message for unknown user and wrong password.
                     st.error("Incorrect username or password.")
                 else:
@@ -684,12 +695,19 @@ def main() -> None:
                        "placeholders from a mock predictor and mean nothing clinically.")
 
     page = sidebar(user, predictor, model_error)
-    if page == "Dashboard":
-        dashboard(user)
-    elif page == "New Scan":
-        new_scan_page(user, predictor, model_error)
-    elif page == "Patients":
-        patients_page(user, predictor)
+    try:
+        if page == "Dashboard":
+            dashboard(user)
+        elif page == "New Scan":
+            new_scan_page(user, predictor, model_error)
+        elif page == "Patients":
+            patients_page(user, predictor)
+    except Exception:  # noqa: BLE001 — last-resort net (st.rerun/stop are BaseException, unaffected)
+        # Stack trace to the server console only; never patient data, never to the screen.
+        log.exception("Unhandled error on page %r", page)
+        st.error("Something went wrong on this page. No result was changed. "
+                 "Try again, or go back to the Dashboard.")
+        st.button("Back to Dashboard", on_click=go, args=("Dashboard",))
 
 
 main()

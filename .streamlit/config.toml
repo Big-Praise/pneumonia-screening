@@ -13,6 +13,12 @@ address = "localhost"
 # Matches config.MAX_UPLOAD_MB; Streamlit rejects larger files before our code runs.
 maxUploadSize = 10
 
+[client]
+# Development: full error details help debugging. Page-level errors are already
+# caught and shown as a friendly message.
+# TODO (Praise): set to "none" in production so no stack trace ever reaches a browser.
+showErrorDetails = "full"
+
 [browser]
 # Keep everything local — no usage telemetry leaves the machine.
 gatherUsageStats = false
