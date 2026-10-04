@@ -5,6 +5,7 @@ modules so they stay testable without Streamlit. Routing is a simple
 session_state key rather than Streamlit multipage, so the login gate and the
 always-on disclaimer are enforced in exactly one place (main()).
 """
+from datetime import datetime
 from functools import partial
 from html import escape
 
@@ -19,6 +20,7 @@ import gradcam
 import lime_explain
 import model_loader
 import predict
+import report
 import storage
 
 st.set_page_config(
@@ -269,6 +271,7 @@ def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
     c_card, c_thr = st.columns([1.3, 1], gap="large")
     with c_card:
         render_result(scan, patient, label, confidence)
+        render_pdf_download(scan, patient, threshold)
     with c_thr:
         render_threshold_control(scan, threshold)
 
@@ -315,6 +318,57 @@ def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
         "result. Highlights outside the lungs suggest the model may be using "
         "non-clinical cues — interpret with care."
     )
+
+
+@st.cache_data(max_entries=32, show_spinner=False)
+def cached_pdf(scan_id: int, image_rel: str, label: str, confidence: float, prob: float,
+               threshold: float, created_iso: str, patient: tuple, clinician: str,
+               lime_saved: bool) -> bytes:
+    """PDF for the SAVED record. Every input that changes the report is an argument,
+    so re-saving a threshold or running LIME produces a fresh PDF automatically."""
+    predictor, _ = get_predictor()
+    original = display_size(storage.open_image(image_rel))
+    try:
+        heatmap = cached_heatmap(image_rel, label)
+        cam = gradcam.overlay(original, heatmap, 0.45)
+    except Exception:  # noqa: BLE001 — report says "unavailable" rather than faking it
+        cam, heatmap = None, None
+    lime_img, weak, agree = None, False, None
+    lime_res = lime_explain.load_cached(image_rel) if lime_saved else None
+    if lime_res is not None:
+        mask = lime_explain.mask_for(lime_res, label)
+        lime_img = lime_explain.overlay(original, mask)
+        weak = lime_explain.top_weight(lime_res, label) < lime_explain.WEAK_WEIGHT
+        agree = lime_explain.agreement(heatmap, mask) if heatmap is not None else None
+    name, age, sex = patient
+    return report.build_pdf(report.ReportData(
+        scan_id=scan_id, scan_time=datetime.fromisoformat(created_iso),
+        patient_name=name, patient_age=age, patient_sex=sex, clinician=clinician,
+        label=label, confidence=confidence, pneumonia_prob=prob, threshold=threshold,
+        model_source=predictor.source if predictor else "model not loaded",
+        is_demo=bool(predictor and predictor.is_demo),
+        original=original, gradcam=cam, lime=lime_img, lime_weak=weak, agreement=agree,
+    ))
+
+
+def render_pdf_download(scan: db.Scan, patient: db.Patient, threshold: float) -> None:
+    created = db.as_utc(scan.created_at).astimezone()
+    try:
+        with st.spinner("Preparing PDF…"):
+            pdf = cached_pdf(
+                scan.id, scan.image_path, scan.predicted_label, scan.confidence,
+                scan.pneumonia_prob, scan.threshold_used, created.isoformat(),
+                (patient.name, patient.age, patient.sex), current_user().display_name,
+                lime_explain.load_cached(scan.image_path) is not None,
+            )
+    except Exception:  # noqa: BLE001
+        st.error("The PDF report could not be generated.")
+        return
+    st.download_button("⬇️ Download PDF report", pdf, file_name=report.filename(scan.id, created),
+                       mime="application/pdf", key=f"pdf_{scan.id}", width="stretch")
+    if abs(threshold - scan.threshold_used) > 1e-9:
+        st.caption(f"The PDF uses the saved threshold ({scan.threshold_used:.2f}). "
+                   "Save the threshold to include the current one.")
 
 
 def render_lime(scan: db.Scan, label: str, original: Image.Image, heatmap, predictor,

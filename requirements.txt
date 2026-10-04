@@ -15,3 +15,4 @@ bcrypt>=4.0
 reportlab
 matplotlib
 pytest
+pypdf  # tests only: reads text back out of generated PDFs
