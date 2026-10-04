@@ -1,26 +1,36 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* Clinical palette: teal = primary / NORMAL, amber = PNEUMONIA (never alarm-red). */
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --color-brand-50: #effaf8;
+  --color-brand-100: #d5f1ec;
+  --color-brand-200: #abe2d8;
+  --color-brand-500: #14907f;
+  --color-brand-600: #0f766e;
+  --color-brand-700: #115e57;
+  --color-brand-900: #12302c;
+  --color-ink: #12302c;
+  --color-muted: #557571;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #f5f8f8;
+  color: var(--color-ink);
+}
+
+/* Range inputs: themed track + thumb, large hit area for touch/projector use. */
+input[type="range"] {
+  accent-color: var(--color-brand-600);
+  height: 1.5rem;
+  cursor: pointer;
+}
+
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.animate-indeterminate {
+  animation: indeterminate 1.4s ease-in-out infinite;
 }
