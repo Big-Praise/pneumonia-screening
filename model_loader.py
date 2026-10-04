@@ -60,7 +60,19 @@ class KerasPredictor:
 
 
 def find_model_file() -> Path | None:
-    return next((p for p in config.MODEL_CANDIDATES if p.exists()), None)
+    local = next((p for p in config.MODEL_CANDIDATES if p.exists()), None)
+    if local is not None or not config.MODEL_HF_REPO:
+        return local
+    # Production: fetch from the private Hugging Face model repo. The token comes
+    # from the HF_TOKEN environment variable (read by huggingface_hub itself).
+    try:
+        from huggingface_hub import hf_hub_download
+
+        return Path(hf_hub_download(config.MODEL_HF_REPO, config.MODEL_HF_FILENAME,
+                                    local_dir=config.BASE_DIR))
+    except Exception as e:  # noqa: BLE001 — a configured-but-unreachable model is an error, not demo mode
+        raise ModelLoadError(f"Could not download model from {config.MODEL_HF_REPO}: "
+                             f"{type(e).__name__}") from e
 
 
 def load_predictor():
@@ -68,7 +80,7 @@ def load_predictor():
     if the file is present but broken — showing fake results instead would
     violate GUARDRAILS ("never fabricate results")."""
     path = find_model_file()  # SWAP: replace with `path = None` to force demo mode
-    if path is None:
+    if path is None:  # no local file and no MODEL_HF_REPO configured
         return MockPredictor()
     try:
         return KerasPredictor(path)

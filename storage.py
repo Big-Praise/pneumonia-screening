@@ -9,10 +9,10 @@ Decisions:
 """
 import io
 import uuid
-from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
+import blobstore
 import config
 
 MIN_SIDE = 64
@@ -46,21 +46,22 @@ def load_upload(data: bytes) -> Image.Image:
 
 def save_image(img: Image.Image) -> str:
     rel = f"{uuid.uuid4().hex}.png"
-    img.save(config.UPLOAD_DIR / rel, format="PNG")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    blobstore.put(rel, buf.getvalue())
     return rel
 
 
-def image_path(rel: str) -> Path:
-    path = (config.UPLOAD_DIR / rel).resolve()
-    # Only ever read inside UPLOAD_DIR, whatever the DB says.
-    if config.UPLOAD_DIR.resolve() not in path.parents:
-        raise ImageError("Invalid image path.")
-    return path
+def delete_image(rel: str) -> None:
+    blobstore.delete(rel)
 
 
 def open_image(rel: str) -> Image.Image:
-    path = image_path(rel)
-    if not path.exists():
+    try:
+        data = blobstore.get(rel)  # disk or DB, per config.BLOB_BACKEND
+    except blobstore.BlobError as e:
+        raise ImageError("Invalid image path.") from e
+    if data is None:
         raise ImageError("The stored image file is missing.")
-    with Image.open(path) as img:
-        return img.copy()  # copy releases the file handle (Windows locks open files)
+    with Image.open(io.BytesIO(data)) as img:
+        return img.copy()

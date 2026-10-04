@@ -9,15 +9,17 @@ Decisions:
 - One run explains BOTH classes (labels=(0, 1)), and we store the superpixel
   map + per-class weights, not a picture. So when the threshold slider flips
   the label, the other class's explanation is already there — no rerun.
-- Cached as .npz next to the uploads (UPLOAD_DIR/lime/), keyed by the stored
+- Cached as .npz in the blob store (disk or DB), keyed by the stored
   image name. Survives restarts, so history and the PDF reuse it.
 - Fixed random_state: the same scan always gets the same explanation.
 """
+import io
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
 
+import blobstore
 import config
 import predict
 
@@ -107,19 +109,19 @@ def agreement(heatmap: np.ndarray, mask: np.ndarray) -> float | None:
     return float((hot & mask).sum() / mask.sum())
 
 
-# ------------------------------------------------------------------ disk cache
+# ------------------------------------------------------------------ cache
+# Stored via blobstore (disk or DB) as "lime/<image stem>.npz", so it survives
+# restarts and history/PDF reuse it.
 
-def _cache_path(image_rel: str) -> Path:
-    d = config.UPLOAD_DIR / "lime"
-    d.mkdir(parents=True, exist_ok=True)
-    return d / (Path(image_rel).stem + ".npz")
+def _cache_name(image_rel: str) -> str:
+    return f"lime/{Path(image_rel).stem}.npz"
 
 
 def load_cached(image_rel: str) -> dict | None:
-    path = _cache_path(image_rel)
-    if not path.exists():
+    data = blobstore.get(_cache_name(image_rel))
+    if data is None:
         return None
-    with np.load(path) as z:
+    with np.load(io.BytesIO(data)) as z:
         return {
             "segments": z["segments"],
             "weights": {0: [tuple(r) for r in z["w0"].tolist()],
@@ -128,9 +130,15 @@ def load_cached(image_rel: str) -> dict | None:
         }
 
 
+def has_cached(image_rel: str) -> bool:
+    return blobstore.exists(_cache_name(image_rel))
+
+
 def save_cached(image_rel: str, result: dict) -> None:
+    buf = io.BytesIO()
     np.savez_compressed(
-        _cache_path(image_rel), segments=result["segments"],
+        buf, segments=result["segments"],
         w0=np.array(result["weights"][0]), w1=np.array(result["weights"][1]),
         num_samples=result["num_samples"],
     )
+    blobstore.put(_cache_name(image_rel), buf.getvalue())

@@ -370,7 +370,7 @@ def render_pdf_download(scan: db.Scan, patient: db.Patient, threshold: float) ->
                 scan.id, scan.image_path, scan.predicted_label, scan.confidence,
                 scan.pneumonia_prob, scan.threshold_used, created.isoformat(),
                 (patient.name, patient.age, patient.sex), current_user().display_name,
-                lime_explain.load_cached(scan.image_path) is not None,
+                lime_explain.has_cached(scan.image_path),
             )
     except Exception:  # noqa: BLE001
         st.error("The PDF report could not be generated.")
@@ -583,7 +583,7 @@ def patient_history(user: auth.AuthUser, patient: db.Patient) -> None:
                 f"**{fmt_dt(scan.created_at)}** · :{colour}[likely {scan.predicted_label}] · "
                 f"confidence {scan.confidence:.0%}"
             )
-            lime_note = " · LIME saved" if lime_explain.load_cached(scan.image_path) else ""
+            lime_note = " · LIME saved" if lime_explain.has_cached(scan.image_path) else ""
             c_txt.caption(f"p = {scan.pneumonia_prob:.3f} · threshold {scan.threshold_used:.2f}"
                           f"{lime_note}")
             c_btn.button("Open", key=f"open_{scan.id}", width="stretch",
@@ -672,7 +672,7 @@ def new_scan_page(user: auth.AuthUser, predictor, model_error) -> None:
                     scan = db.create_scan(user.id, patient_id, rel, label, conf, p,
                                           config.DEFAULT_THRESHOLD)
                 except Exception:  # noqa: BLE001
-                    storage.image_path(rel).unlink(missing_ok=True)  # no orphan files
+                    storage.delete_image(rel)  # no orphan files
                     st.error("Could not save the result. Please try again.")
                     return
             st.session_state.last_scan_id = scan.id

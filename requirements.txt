@@ -16,3 +16,11 @@ reportlab
 matplotlib
 pytest
 pypdf  # tests only: reads text back out of generated PDFs
+# API backend (see requirements-api.txt for the slimmer container list)
+fastapi
+uvicorn
+python-multipart
+pyjwt
+psycopg[binary]
+huggingface_hub
+httpx  # tests only: FastAPI TestClient

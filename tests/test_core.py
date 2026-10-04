@@ -75,7 +75,7 @@ def test_bad_uploads_rejected(data):
 def test_path_traversal_blocked(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "UPLOAD_DIR", tmp_path)
     with pytest.raises(storage.ImageError):
-        storage.image_path("../app.db")
+        storage.open_image("../app.db")
 
 
 # ---------------------------------------------------------------- db scoping

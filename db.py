@@ -11,7 +11,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    DateTime, Float, ForeignKey, Integer, String, Text, create_engine, event, func, select,
+    DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text, create_engine, event, func,
+    select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
@@ -82,6 +83,16 @@ class Scan(Base):
         return f"<Scan id={self.id} patient_id={self.patient_id}>"
 
 
+class Blob(Base):
+    """Binary files (X-ray PNGs, LIME results) when BLOB_BACKEND=db. Keyed by the
+    same relative name used on disk, so Scan.image_path works with either backend."""
+    __tablename__ = "blobs"
+
+    name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 _engine = None
 _SessionLocal = None
 
@@ -95,7 +106,8 @@ def init_db(url: str | None = None) -> None:
     is_sqlite = url.startswith("sqlite")
     # Streamlit reruns scripts on different threads; SQLite must allow that.
     connect_args = {"check_same_thread": False} if is_sqlite else {}
-    _engine = create_engine(url, connect_args=connect_args)
+    # pool_pre_ping: hosted Postgres (Neon) closes idle connections; re-check before use.
+    _engine = create_engine(url, connect_args=connect_args, pool_pre_ping=not is_sqlite)
     if is_sqlite:
         # SQLite ignores foreign keys unless asked per connection.
         @event.listens_for(_engine, "connect")
