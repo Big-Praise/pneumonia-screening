@@ -119,6 +119,24 @@ def test_update_threshold_recomputes_label_and_is_scoped():
         db.update_scan_threshold(a.id, scan.id, 1.5)
 
 
+def test_history_queries_ordered_and_scoped():
+    a = auth.register_user("dr.a", "password-a")
+    b = auth.register_user("dr.b", "password-b")
+    p1 = db.create_patient(a.id, "Zed Test")
+    p2 = db.create_patient(a.id, "Amy Test")
+    s1 = db.create_scan(a.id, p1.id, "1.png", "NORMAL", 0.9, 0.1, 0.5)
+    s2 = db.create_scan(a.id, p1.id, "2.png", "PNEUMONIA", 0.8, 0.8, 0.5)
+
+    assert [s.id for s in db.scans_for_patient(a.id, p1.id)] == [s2.id, s1.id]  # newest first
+    assert db.scans_for_patient(a.id, p2.id) == []
+    with pytest.raises(db.NotFound):
+        db.scans_for_patient(b.id, p1.id)
+
+    summary = [(p.name, n, last is not None) for p, n, last in db.patient_summaries(a.id)]
+    assert summary == [("Amy Test", 0, False), ("Zed Test", 2, True)]  # alphabetical
+    assert db.patient_summaries(b.id) == []
+
+
 def test_patient_validation():
     a = auth.register_user("dr.a", "password-a")
     with pytest.raises(ValueError):

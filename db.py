@@ -205,6 +205,28 @@ def get_scan(user_id: int, scan_id: int) -> tuple[Scan, Patient]:
         return row[0], row[1]
 
 
+def patient_summaries(user_id: int) -> list[tuple[Patient, int, datetime | None]]:
+    """Each of the user's patients with their scan count and latest scan time."""
+    with get_session() as s:
+        rows = s.execute(
+            select(Patient, func.count(Scan.id), func.max(Scan.created_at))
+            .outerjoin(Scan, (Scan.patient_id == Patient.id) & (Scan.user_id == user_id))
+            .where(Patient.created_by == user_id)
+            .group_by(Patient.id).order_by(Patient.name)
+        ).all()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+
+def scans_for_patient(user_id: int, patient_id: int) -> list[Scan]:
+    """A patient's scan history, newest first (ownership-checked)."""
+    get_patient(user_id, patient_id)
+    with get_session() as s:
+        return list(s.scalars(
+            select(Scan).where(Scan.patient_id == patient_id, Scan.user_id == user_id)
+            .order_by(Scan.created_at.desc(), Scan.id.desc())
+        ))
+
+
 def recent_scans(user_id: int, limit: int = 10) -> list[tuple[Scan, Patient]]:
     with get_session() as s:
         rows = s.execute(

@@ -5,6 +5,7 @@ modules so they stay testable without Streamlit. Routing is a simple
 session_state key rather than Streamlit multipage, so the login gate and the
 always-on disclaimer are enforced in exactly one place (main()).
 """
+from functools import partial
 from html import escape
 
 import numpy as np
@@ -274,7 +275,15 @@ def render_scan_view(scan: db.Scan, patient: db.Patient, predictor) -> None:
     st.subheader("What drove this result")
     st.caption("Two independent explanations; agreement increases confidence in the "
                "highlighted region.")
-    original = display_size(storage.open_image(scan.image_path))
+    try:
+        original = display_size(storage.open_image(scan.image_path))
+    except storage.ImageError as e:  # e.g. file removed from uploads/ by hand
+        st.error(f"{e} The saved result above is still valid; explanations need the image.")
+        return
+    if predictor is None:  # model failed to load — saved data is shown, nothing recomputed
+        st.image(original, caption="Original X-ray", width=360)
+        st.warning("The model is not loaded, so explanations can't be computed right now.")
+        return
     demo = " — DEMO: meaningless" if predictor.is_demo else ""
     heatmap = None
     c_orig, c_cam, c_lime = st.columns(3, gap="medium")
@@ -363,6 +372,7 @@ def dashboard(user: auth.AuthUser) -> None:
     if not rows:
         st.caption("No screenings yet. Start with **New scan**.")
         return
+    st.caption("Select a row to reopen that screening.")
     st.dataframe(
         [{
             "Date": fmt_dt(s.created_at),
@@ -371,7 +381,9 @@ def dashboard(user: auth.AuthUser) -> None:
             "Confidence": f"{s.confidence:.0%}",
             "Threshold": f"{s.threshold_used:.2f}",
         } for s, p in rows],
-        hide_index=True, width="stretch",
+        hide_index=True, width="stretch", key="recent_table",
+        selection_mode="single-row",
+        on_select=partial(_table_pick, "recent_table", [(p.id, s.id) for s, p in rows], open_scan),
     )
 
 
@@ -395,20 +407,133 @@ def patient_form(user: auth.AuthUser, key: str) -> db.Patient | None:
     return None
 
 
-def patients_page(user: auth.AuthUser) -> None:
+# ------------------------------------------------- patients + history (M6)
+# Navigation inside the Patients page is two session keys:
+#   hist_patient_id -> show that patient's history
+#   open_scan_id    -> show one saved scan in the full result view
+# Changes happen in button/table callbacks, which run before widgets are drawn,
+# so they can also switch the sidebar page.
+
+def open_patient(patient_id: int) -> None:
+    st.session_state.hist_patient_id = patient_id
+    st.session_state.pop("open_scan_id", None)
+    st.session_state.page = "Patients"
+
+
+def open_scan(patient_id: int, scan_id: int) -> None:
+    open_patient(patient_id)
+    st.session_state.open_scan_id = scan_id
+
+
+def back_to_list() -> None:
+    st.session_state.pop("hist_patient_id", None)
+    st.session_state.pop("open_scan_id", None)
+
+
+def back_to_history() -> None:
+    st.session_state.pop("open_scan_id", None)
+
+
+def new_scan_for(patient_id: int) -> None:
+    st.session_state.scan_patient_id = patient_id
+    _clear_result()
+    st.session_state.page = "New Scan"
+
+
+def _table_pick(table_key: str, ids: list, then) -> None:
+    """Callback for a single-row selectable dataframe: act on the picked row."""
+    rows = st.session_state[table_key].selection.rows
+    if rows:
+        then(*ids[rows[0]])
+
+
+@st.cache_data(max_entries=256, show_spinner=False)
+def thumbnail(image_rel: str) -> Image.Image | None:
+    try:
+        img = storage.open_image(image_rel)
+    except storage.ImageError:
+        return None
+    img.thumbnail((160, 160))
+    return img
+
+
+def patients_page(user: auth.AuthUser, predictor) -> None:
+    pid = st.session_state.get("hist_patient_id")
+    if pid is not None:
+        try:
+            patient = db.get_patient(user.id, pid)
+        except db.NotFound:
+            back_to_list()
+            st.rerun()
+        if st.session_state.get("open_scan_id") is not None:
+            saved_scan_view(user, patient, predictor)
+        else:
+            patient_history(user, patient)
+        return
+
     st.title("Patients")
     with st.expander("➕ Add a patient", expanded=False):
         patient_form(user, "add_patient_page")
-    patients = db.list_patients(user.id)
-    if not patients:
+    rows = db.patient_summaries(user.id)
+    if not rows:
         st.caption("No patients yet.")
         return
+    st.caption("Select a patient to see their scan history.")
     st.dataframe(
-        [{"Name": p.name, "Age": p.age, "Sex": p.sex or "", "Note": p.note or "",
-          "Added": fmt_dt(p.created_at)} for p in patients],
-        hide_index=True, width="stretch",
+        [{"Name": p.name, "Age": p.age, "Sex": p.sex or "", "Scans": n,
+          "Last scan": fmt_dt(last) if last else "—", "Note": p.note or ""}
+         for p, n, last in rows],
+        hide_index=True, width="stretch", key="patient_table",
+        selection_mode="single-row",
+        on_select=partial(_table_pick, "patient_table", [(p.id,) for p, _, _ in rows], open_patient),
     )
-    st.caption("Per-patient scan history arrives in M6.")
+
+
+def patient_history(user: auth.AuthUser, patient: db.Patient) -> None:
+    st.button("← All patients", on_click=back_to_list)
+    st.title(patient.name)
+    facts = [f"Age {patient.age}" if patient.age is not None else None,
+             patient.sex or None, f"added {fmt_dt(patient.created_at)}"]
+    st.caption(" · ".join(f for f in facts if f))
+    if patient.note:
+        st.write(patient.note)
+    st.button("➕ New scan for this patient", type="primary",
+              on_click=new_scan_for, args=(patient.id,))
+
+    scans = db.scans_for_patient(user.id, patient.id)
+    st.subheader(f"Scan history ({len(scans)})")
+    if not scans:
+        st.caption("No scans yet for this patient.")
+        return
+    for scan in scans:
+        with st.container(border=True):
+            c_img, c_txt, c_btn = st.columns([1, 4, 1.2], vertical_alignment="center")
+            thumb = thumbnail(scan.image_path)
+            if thumb is not None:
+                c_img.image(thumb, width=110)
+            else:
+                c_img.caption("image missing")
+            colour = "orange" if scan.predicted_label == predict.PNEUMONIA else "green"
+            c_txt.markdown(
+                f"**{fmt_dt(scan.created_at)}** · :{colour}[likely {scan.predicted_label}] · "
+                f"confidence {scan.confidence:.0%}"
+            )
+            lime_note = " · LIME saved" if lime_explain.load_cached(scan.image_path) else ""
+            c_txt.caption(f"p = {scan.pneumonia_prob:.3f} · threshold {scan.threshold_used:.2f}"
+                          f"{lime_note}")
+            c_btn.button("Open", key=f"open_{scan.id}", width="stretch",
+                         on_click=open_scan, args=(patient.id, scan.id))
+
+
+def saved_scan_view(user: auth.AuthUser, patient: db.Patient, predictor) -> None:
+    st.button(f"← Back to {patient.name}'s history", on_click=back_to_history)
+    try:
+        scan, patient = db.get_scan(user.id, st.session_state.open_scan_id)
+    except db.NotFound:
+        back_to_history()
+        st.rerun()
+    st.title("Saved screening")
+    render_scan_view(scan, patient, predictor)
 
 
 def _clear_result() -> None:
@@ -510,7 +635,7 @@ def main() -> None:
     elif page == "New Scan":
         new_scan_page(user, predictor, model_error)
     elif page == "Patients":
-        patients_page(user)
+        patients_page(user, predictor)
 
 
 main()
