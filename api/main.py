@@ -109,6 +109,13 @@ def image_response(data: bytes, media: str = "image/jpeg") -> Response:
 
 # ------------------------------------------------------------------ public
 
+@app.get("/")
+def root():
+    # The Space's landing URL: point humans at the real UI, reveal nothing else.
+    return {"service": "Pneumonia Screening API", "note": "Decision-support only — not a diagnosis.",
+            "health": "/api/health"}
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "model": model.status()["status"]}
