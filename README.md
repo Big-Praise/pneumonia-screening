@@ -263,3 +263,16 @@ env vars `DATABASE_URL` (Neon, pooled), `JWT_SECRET`, `REGISTRATION_CODE`, `HF_T
 (read) and `MODEL_HF_REPO=ZPraise/pneumonia-model` (the private model repo). Then redeploy
 Vercel with `BACKEND_URL=<Cloud Run URL>`:
 `cd web; vercel deploy --prod --build-env BACKEND_URL=<url> --env BACKEND_URL=<url>`.
+
+### Current setup: ngrok permanent URL (preferred over the quick tunnel)
+- Backend URL: `https://rearview-uncork-clothes.ngrok-free.dev` (free ngrok static domain).
+  It's set once as `BACKEND_URL` in Vercel → Settings → Environment Variables.
+- `.env.backend` has `NGROK_DOMAIN=...`, so `serve_public.py` uses ngrok automatically.
+  **No redeploy is needed on restart.** Just run `.venv\Scripts\python serve_public.py`.
+- `tools/ngrok.exe` comes from ngrok's official download. Run
+  `tools\ngrok.exe config add-authtoken <token>` once per PC.
+- Vercel deploys automatically on every push to `main` (Root Directory = `web`).
+- `web/src/proxy.ts` adds `ngrok-skip-browser-warning` to every `/api` request, so
+  ngrok's free-tier warning page never breaks the app.
+- Free plan limits: about 1 GB/month of traffic, and only one ngrok agent online at a time.
+- Force the old Cloudflare quick tunnel with `serve_public.py --cloudflare --deploy`.
