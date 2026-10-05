@@ -178,3 +178,46 @@ def test_lime_long_poll_returns_when_done(client):
             break
         st = client.get(f"/api/scans/{sid}/lime?wait=25").json()
     assert st["status"] == "done" and "labels" in st
+
+
+def test_edit_and_delete_endpoints(client):
+    import blobstore
+    import lime_explain
+    _register(client)
+    pid = client.post("/api/patients", json={"name": "Test Patient", "age": 30}).json()["id"]
+    sids = [client.post(f"/api/patients/{pid}/scans",
+                        files={"file": ("x.png", _xray_bytes(i), "image/png")}).json()["id"]
+            for i in (1, 2)]
+
+    r = client.patch(f"/api/patients/{pid}", json={"name": "Renamed Patient", "age": 31, "sex": "Male"})
+    assert r.status_code == 200 and r.json()["name"] == "Renamed Patient"
+    assert client.patch(f"/api/patients/{pid}", json={"name": "  "}).status_code == 400
+
+    # LIME result for scan 0, then delete scan 0: image + LIME blobs both gone.
+    client.post(f"/api/scans/{sids[0]}/lime")
+    client.get(f"/api/scans/{sids[0]}/lime?wait=25")
+    img = client.get(f"/api/scans/{sids[0]}").json()
+    import db as _db
+    path0 = _db.get_scan(1, sids[0])[0].image_path
+    assert blobstore.exists(path0) and blobstore.exists(lime_explain.cache_name(path0))
+    assert client.delete(f"/api/scans/{sids[0]}").json() == {"ok": True}
+    assert client.get(f"/api/scans/{sids[0]}").status_code == 404
+    assert not blobstore.exists(path0) and not blobstore.exists(lime_explain.cache_name(path0))
+    assert img["patient"]["name"] == "Renamed Patient"
+
+    # Other clinicians can't edit or delete.
+    path1 = _db.get_scan(1, sids[1])[0].image_path
+    client.post("/api/auth/logout")
+    _register(client, "dr.b", "password-b")
+    assert client.patch(f"/api/patients/{pid}", json={"name": "Hijack"}).status_code == 404
+    assert client.delete(f"/api/patients/{pid}").status_code == 404
+    assert client.delete(f"/api/scans/{sids[1]}").status_code == 404
+    client.post("/api/auth/logout")
+    client.post("/api/auth/login", json={"username": "dr.a", "password": "password-a"})
+
+    # Delete patient: cascades to the remaining scan and its stored image.
+    assert client.delete(f"/api/patients/{pid}").json() == {"deleted_scans": 1}
+    assert client.get(f"/api/patients/{pid}").status_code == 404
+    assert client.get(f"/api/scans/{sids[1]}").status_code == 404
+    assert not blobstore.exists(path1)
+    assert client.get("/api/dashboard").json()["scans"] == 0

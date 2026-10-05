@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useSession } from "@/components/session";
 import { Button, Card, Icon, Loading, Notice, Spinner, cx } from "@/components/ui";
 import { api, classify, fmtDate, urls, type Label, type LimeStatus, type ScanDetail } from "@/lib/api";
@@ -17,6 +18,8 @@ export default function ScanPage() {
   const [opacity, setOpacity] = useState(meta.default_opacity);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     api.scan(scanId).then((s) => { setScan(s); setThreshold(s.threshold_used); }).catch((e) => setError(e.message));
@@ -139,6 +142,20 @@ export default function ScanPage() {
         </div>
         <p className="mt-4 text-xs text-muted">Highlights outside the lungs suggest the model may be using non-clinical cues — interpret with care.</p>
       </section>
+
+      <div className="mt-12 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50/40 px-5 py-4">
+        <div className="text-sm">
+          <div className="font-semibold text-ink">Delete this scan</div>
+          <div className="text-muted">Permanently removes this screening, its X-ray image and its explanations.</div>
+        </div>
+        <Button variant="danger" onClick={() => setDeleting(true)}><Icon name="trash" className="h-4 w-4" /> Delete scan</Button>
+      </div>
+      <ConfirmDialog open={deleting} onClose={() => setDeleting(false)}
+        title="Delete this scan?" confirmLabel="Delete permanently"
+        onConfirm={async () => { await api.deleteScan(scan.id); router.replace(`/patients/${scan.patient.id}`); }}>
+        <p>This permanently deletes the screening from <b>{fmtDate(scan.created_at)}</b> for <b>{scan.patient.name}</b>, including the X-ray image, Grad-CAM/LIME results and saved threshold.</p>
+        <p>It can&apos;t be undone. Downloaded PDF reports are not affected.</p>
+      </ConfirmDialog>
     </>
   );
 }

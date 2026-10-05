@@ -26,7 +26,7 @@ export default function PatientsPage() {
       {adding && (
         <Card className="mb-6 p-5">
           <h2 className="mb-4 font-semibold">New patient</h2>
-          <PatientForm onCancel={() => setAdding(false)} onCreated={(p) => router.push(`/patients/${p.id}`)} />
+          <PatientForm onCancel={() => setAdding(false)} onSaved={(p) => router.push(`/patients/${p.id}`)} />
         </Card>
       )}
 

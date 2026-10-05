@@ -113,12 +113,12 @@ def agreement(heatmap: np.ndarray, mask: np.ndarray) -> float | None:
 # Stored via blobstore (disk or DB) as "lime/<image stem>.npz", so it survives
 # restarts and history/PDF reuse it.
 
-def _cache_name(image_rel: str) -> str:
+def cache_name(image_rel: str) -> str:
     return f"lime/{Path(image_rel).stem}.npz"
 
 
 def load_cached(image_rel: str) -> dict | None:
-    data = blobstore.get(_cache_name(image_rel))
+    data = blobstore.get(cache_name(image_rel))
     if data is None:
         return None
     with np.load(io.BytesIO(data)) as z:
@@ -131,7 +131,7 @@ def load_cached(image_rel: str) -> dict | None:
 
 
 def has_cached(image_rel: str) -> bool:
-    return blobstore.exists(_cache_name(image_rel))
+    return blobstore.exists(cache_name(image_rel))
 
 
 def save_cached(image_rel: str, result: dict) -> None:
@@ -141,4 +141,4 @@ def save_cached(image_rel: str, result: dict) -> None:
         w0=np.array(result["weights"][0]), w1=np.array(result["weights"][1]),
         num_samples=result["num_samples"],
     )
-    blobstore.put(_cache_name(image_rel), buf.getvalue())
+    blobstore.put(cache_name(image_rel), buf.getvalue())

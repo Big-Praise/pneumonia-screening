@@ -7,11 +7,12 @@ export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
 }
 
-type Variant = "primary" | "secondary" | "ghost";
+type Variant = "primary" | "secondary" | "ghost" | "danger";
 const variants: Record<Variant, string> = {
   primary: "bg-brand-600 text-white hover:bg-brand-700 shadow-sm disabled:bg-brand-600/50",
   secondary: "bg-white text-ink border border-slate-300 hover:bg-slate-50 disabled:opacity-50",
   ghost: "text-brand-700 hover:bg-brand-50 disabled:opacity-50",
+  danger: "bg-rose-600 text-white hover:bg-rose-700 shadow-sm disabled:bg-rose-600/50",
 };
 const base =
   "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold " +
@@ -104,6 +105,8 @@ const paths: Record<string, string> = {
   check: "M5 12l5 5L20 7",
   lungs: "M12 4v8m0 0c0 2-1.5 3-3 3M12 12c0 2 1.5 3 3 3M8.5 7C6 7 4 10 4 14c0 3 1 5 3 5 2.5 0 3-2 3-5V9.5C10 8 9.5 7 8.5 7Zm7 0C18 7 20 10 20 14c0 3-1 5-3 5-2.5 0-3-2-3-5V9.5C14 8 14.5 7 15.5 7Z",
   menu: "M4 6h16M4 12h16M4 18h16",
+  edit: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z",
+  trash: "M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6",
 };
 export function Icon({ name, className }: { name: keyof typeof paths | string; className?: string }) {
   return (

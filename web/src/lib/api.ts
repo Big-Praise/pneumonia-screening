@@ -84,6 +84,10 @@ export const api = {
   createPatient: (b: { name: string; age: number | null; sex: string | null; note: string | null }) =>
     request<Patient>("/api/patients", json("POST", b)),
   patient: (id: number) => request<Patient & { scans: Scan[] }>(`/api/patients/${id}`),
+  updatePatient: (id: number, b: { name: string; age: number | null; sex: string | null; note: string | null }) =>
+    request<Patient>(`/api/patients/${id}`, json("PATCH", b)),
+  deletePatient: (id: number) => request<{ deleted_scans: number }>(`/api/patients/${id}`, { method: "DELETE" }),
+  deleteScan: (id: number) => request<{ ok: boolean }>(`/api/scans/${id}`, { method: "DELETE" }),
   uploadScan: (patientId: number, file: Blob, filename: string) => {
     const fd = new FormData();
     fd.append("file", file, filename);

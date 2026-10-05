@@ -92,7 +92,7 @@ function NewScan() {
             {adding ? (
               <div className="mt-2">
                 <PatientForm onCancel={patients.length ? () => setAdding(false) : undefined}
-                  onCreated={(p) => {
+                  onSaved={(p) => {
                     setPatients([...patients, { ...p, scan_count: 0, last_scan_at: null }]);
                     setPatientId(p.id);
                     setAdding(false);

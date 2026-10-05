@@ -234,6 +234,39 @@ def get_patient(patient_id: int, user: auth.AuthUser = Depends(User)):
     return {**patient_json(p), "scans": [scan_json(s) for s in scans]}
 
 
+@app.patch("/api/patients/{patient_id}")
+def update_patient(patient_id: int, body: PatientIn, user: auth.AuthUser = Depends(User)):
+    try:
+        p = db.update_patient(user.id, patient_id, body.name, body.age, body.sex, body.note)
+    except db.NotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Patient not found.") from None
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    return patient_json(p)
+
+
+def _refuse_if_lime_running(image_paths: list[str]) -> None:
+    # A running LIME job would write its result after the delete (an orphan file).
+    if any(lime_jobs.status(p)["status"] in ("queued", "running") for p in image_paths):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "A LIME explanation is still running for this record. "
+                            "Try again when it finishes.")
+
+
+@app.delete("/api/patients/{patient_id}")
+def delete_patient(patient_id: int, user: auth.AuthUser = Depends(User)):
+    """Permanently deletes the patient, all their scans, and the stored X-rays."""
+    try:
+        _refuse_if_lime_running([s.image_path for s in db.scans_for_patient(user.id, patient_id)])
+        paths = db.delete_patient(user.id, patient_id)
+    except db.NotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Patient not found.") from None
+    for path in paths:
+        storage.delete_scan_files(path)
+    log.info("Deleted patient %s (%d scans)", patient_id, len(paths))  # ids only, no patient data
+    return {"deleted_scans": len(paths)}
+
+
 # ------------------------------------------------------------------ scans
 
 @app.post("/api/patients/{patient_id}/scans", status_code=201)
@@ -276,6 +309,17 @@ def get_scan(scan_id: int, user: auth.AuthUser = Depends(User)):
 
 class ThresholdIn(BaseModel):
     threshold: float = Field(ge=0.0, le=1.0)
+
+
+@app.delete("/api/scans/{scan_id}")
+def delete_scan(scan_id: int, user: auth.AuthUser = Depends(User)):
+    """Permanently deletes one scan, its stored X-ray and its LIME result."""
+    scan, _ = owned_scan(user, scan_id)
+    _refuse_if_lime_running([scan.image_path])
+    path = db.delete_scan(user.id, scan_id)
+    storage.delete_scan_files(path)
+    log.info("Deleted scan %s", scan_id)
+    return {"ok": True}
 
 
 @app.patch("/api/scans/{scan_id}")

@@ -56,6 +56,19 @@ def delete_image(rel: str) -> None:
     blobstore.delete(rel)
 
 
+def delete_scan_files(rel: str) -> None:
+    """Remove everything stored for a deleted scan: the X-ray and its LIME result.
+    Called after the DB rows are gone; a failure here leaves an unreachable file,
+    never a scan pointing at a missing image."""
+    import lime_explain  # local import keeps storage light for callers that never use LIME
+
+    for name in (rel, lime_explain.cache_name(rel)):
+        try:
+            blobstore.delete(name)
+        except blobstore.BlobError:
+            pass
+
+
 def open_image(rel: str) -> Image.Image:
     try:
         data = blobstore.get(rel)  # disk or DB, per config.BLOB_BACKEND

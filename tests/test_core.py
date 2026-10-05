@@ -143,3 +143,29 @@ def test_patient_validation():
         db.create_patient(a.id, "   ")
     with pytest.raises(ValueError):
         db.create_patient(a.id, "Someone", age=200)
+
+
+def test_update_and_delete_patient_scoped_and_cascading():
+    a = auth.register_user("dr.a", "password-a")
+    b = auth.register_user("dr.b", "password-b")
+    p = db.create_patient(a.id, "Old Name", 30)
+    s1 = db.create_scan(a.id, p.id, "1.png", "NORMAL", 0.9, 0.1, 0.5)
+    s2 = db.create_scan(a.id, p.id, "2.png", "NORMAL", 0.9, 0.1, 0.5)
+
+    up = db.update_patient(a.id, p.id, "  New Name ", 31, "Female", " note ")
+    assert (up.name, up.age, up.sex, up.note) == ("New Name", 31, "Female", "note")
+    with pytest.raises(ValueError):
+        db.update_patient(a.id, p.id, "", 31)
+    with pytest.raises(db.NotFound):
+        db.update_patient(b.id, p.id, "Hijack")
+    with pytest.raises(db.NotFound):
+        db.delete_patient(b.id, p.id)
+    with pytest.raises(db.NotFound):
+        db.delete_scan(b.id, s1.id)
+
+    assert db.delete_scan(a.id, s1.id) == "1.png"
+    assert [s.id for s in db.scans_for_patient(a.id, p.id)] == [s2.id]
+    assert db.delete_patient(a.id, p.id) == ["2.png"]
+    with pytest.raises(db.NotFound):
+        db.get_patient(a.id, p.id)
+    assert db.count_for_user(a.id) == (0, 0)

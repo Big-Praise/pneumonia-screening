@@ -1,15 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Card, Icon, LabelPill, LinkButton, Loading, Notice, PageHeader } from "@/components/ui";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { PatientForm } from "@/components/patient-form";
+import { Button, Card, Icon, LabelPill, LinkButton, Loading, Notice, PageHeader } from "@/components/ui";
 import { api, fmtDate, urls, type Patient, type Scan } from "@/lib/api";
 
 export default function PatientHistoryPage() {
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<(Patient & { scans: Scan[] }) | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
 
   useEffect(() => { api.patient(Number(id)).then(setData).catch((e) => setError(e.message)); }, [id]);
 
@@ -24,8 +29,20 @@ export default function PatientHistoryPage() {
         <Icon name="back" className="h-4 w-4" /> All patients
       </Link>
       <PageHeader title={data.name} subtitle={facts.join(" · ")}
-        action={<LinkButton href={`/scan/new?patient=${data.id}`}><Icon name="plus" className="h-4 w-4" /> New scan for this patient</LinkButton>} />
-      {data.note && <Card className="mb-6 px-5 py-4 text-sm text-slate-700">{data.note}</Card>}
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setEditing(true)}><Icon name="edit" className="h-4 w-4" /> Edit</Button>
+            <LinkButton href={`/scan/new?patient=${data.id}`}><Icon name="plus" className="h-4 w-4" /> New scan for this patient</LinkButton>
+          </div>
+        } />
+      {editing && (
+        <Card className="mb-6 p-5">
+          <h2 className="mb-4 font-semibold">Edit patient</h2>
+          <PatientForm patient={data} onCancel={() => setEditing(false)}
+            onSaved={(p) => { setData({ ...data, ...p }); setEditing(false); }} />
+        </Card>
+      )}
+      {data.note && !editing && <Card className="mb-6 px-5 py-4 text-sm text-slate-700">{data.note}</Card>}
 
       <h2 className="mb-3 font-semibold text-ink">Scan history ({data.scans.length})</h2>
       {data.scans.length === 0 ? (
@@ -51,6 +68,20 @@ export default function PatientHistoryPage() {
           ))}
         </div>
       )}
+
+      <div className="mt-12 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50/40 px-5 py-4">
+        <div className="text-sm">
+          <div className="font-semibold text-ink">Delete this patient</div>
+          <div className="text-muted">Permanently removes the patient, all {data.scans.length} scan(s) and their stored X-rays.</div>
+        </div>
+        <Button variant="danger" onClick={() => setDeleting(true)}><Icon name="trash" className="h-4 w-4" /> Delete patient</Button>
+      </div>
+      <ConfirmDialog open={deleting} onClose={() => setDeleting(false)}
+        title={`Delete ${data.name}?`} confirmLabel="Delete permanently"
+        onConfirm={async () => { await api.deletePatient(data.id); router.replace("/patients"); }}>
+        <p>This permanently deletes the patient record, <b>{data.scans.length} scan(s)</b>, their X-ray images, explanations and saved thresholds.</p>
+        <p>It can&apos;t be undone. Downloaded PDF reports are not affected.</p>
+      </ConfirmDialog>
     </>
   );
 }

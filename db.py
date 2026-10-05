@@ -150,19 +150,64 @@ def as_utc(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def create_patient(user_id: int, name: str, age: int | None = None,
-                   sex: str | None = None, note: str | None = None) -> Patient:
+def _clean_patient_fields(name, age, sex, note) -> dict:
     name = (name or "").strip()
     if not name:
         raise ValueError("Patient name is required.")
     if age is not None and not 0 <= age <= 130:
         raise ValueError("Age must be between 0 and 130.")
+    return {"name": name, "age": age, "sex": sex or None, "note": (note or "").strip() or None}
+
+
+def create_patient(user_id: int, name: str, age: int | None = None,
+                   sex: str | None = None, note: str | None = None) -> Patient:
+    fields = _clean_patient_fields(name, age, sex, note)
     with get_session() as s:
-        p = Patient(name=name, age=age, sex=sex or None,
-                    note=(note or "").strip() or None, created_by=user_id)
+        p = Patient(**fields, created_by=user_id)
         s.add(p)
         s.flush()
         return p
+
+
+def update_patient(user_id: int, patient_id: int, name: str, age: int | None = None,
+                   sex: str | None = None, note: str | None = None) -> Patient:
+    """Replace the patient's editable details (same validation as create)."""
+    fields = _clean_patient_fields(name, age, sex, note)
+    with get_session() as s:
+        p = s.get(Patient, patient_id)
+        if p is None or p.created_by != user_id:
+            raise NotFound("Patient not found.")
+        for k, v in fields.items():
+            setattr(p, k, v)
+        s.flush()
+        return p
+
+
+def delete_patient(user_id: int, patient_id: int) -> list[str]:
+    """Delete a patient and all their scans in one transaction. Returns the
+    deleted scans' image paths so the caller can remove the stored files."""
+    with get_session() as s:
+        p = s.get(Patient, patient_id)
+        if p is None or p.created_by != user_id:
+            raise NotFound("Patient not found.")
+        scans = list(s.scalars(select(Scan).where(Scan.patient_id == patient_id)))
+        paths = [sc.image_path for sc in scans]
+        for sc in scans:
+            s.delete(sc)
+        s.flush()  # scans first: they reference the patient
+        s.delete(p)
+        return paths
+
+
+def delete_scan(user_id: int, scan_id: int) -> str:
+    """Delete one scan. Returns its image path for file cleanup."""
+    with get_session() as s:
+        scan = s.get(Scan, scan_id)
+        if scan is None or scan.user_id != user_id:
+            raise NotFound("Scan not found.")
+        path = scan.image_path
+        s.delete(scan)
+        return path
 
 
 def list_patients(user_id: int) -> list[Patient]:
