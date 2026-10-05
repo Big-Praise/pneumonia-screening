@@ -49,6 +49,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     window.location.href = "/login";
   }
   if (!res.ok) {
+    // A non-JSON error means the request never reached our API: the tunnel or the
+    // backend PC is offline (ngrok/Cloudflare answer with their own HTML pages).
+    if (!(res.headers.get("content-type") ?? "").includes("application/json")) {
+      throw new ApiError(res.status,
+        "The screening server is offline right now. It runs on the host PC — please try again once it's started.");
+    }
     let msg = res.status >= 500
       ? "The server had a problem. No result was changed — please try again."
       : `Request failed (${res.status}).`;
