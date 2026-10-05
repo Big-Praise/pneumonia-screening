@@ -14,4 +14,3 @@ pneumonia_model.h5
 
 .env
 .streamlit/secrets.toml
-deploy/.space/

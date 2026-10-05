@@ -187,11 +187,27 @@ function LimePanel({ scanId, label, initial, canRun, samples }:
 
   const poll = useCallback(() => api.limeStatus(scanId).then(setSt).catch(() => {}), [scanId]);
   useEffect(() => { if (initial.status === "done") poll(); }, [initial.status, poll]); // fetch per-label facts
+
+  // While LIME runs, keep exactly one long-poll open (server holds it up to 20 s).
+  // On Cloud Run an open request is what keeps the container's CPU running the job.
+  const running = st.status === "queued" || st.status === "running";
   useEffect(() => {
-    if (st.status !== "queued" && st.status !== "running") return;
-    const t = setInterval(poll, 2000);
-    return () => clearInterval(t);
-  }, [st.status, poll]);
+    if (!running) return;
+    let alive = true;
+    (async () => {
+      while (alive) {
+        try {
+          const next = await api.limeStatus(scanId, 20);
+          if (!alive) return;
+          setSt(next);
+          if (next.status !== "queued" && next.status !== "running") return;
+        } catch {
+          await new Promise((r) => setTimeout(r, 3000)); // transient error: back off, retry
+        }
+      }
+    })();
+    return () => { alive = false; };
+  }, [running, scanId]);
 
   async function start() {
     try { setSt(await api.limeStart(scanId)); } catch { setSt({ status: "error", progress: 0 }); }

@@ -10,10 +10,12 @@ instead of blocking the event loop.
 """
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -45,7 +47,10 @@ LIMITATIONS = [
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init_db()
-    model.start_loading()
+    if config.MODEL_LOAD_BLOCKING:
+        await run_in_threadpool(model.load_now)   # Cloud Run: finish while startup has CPU
+    else:
+        model.start_loading()
     if security.USING_EPHEMERAL_SECRET:
         log.warning("JWT_SECRET not set: using a temporary secret (sessions end on restart).")
     yield
@@ -312,9 +317,16 @@ def scan_gradcam(scan_id: int, label: str, user: auth.AuthUser = Depends(User)):
 
 
 @app.get("/api/scans/{scan_id}/lime")
-def lime_status(scan_id: int, user: auth.AuthUser = Depends(User)):
+def lime_status(scan_id: int, wait: float = 0, user: auth.AuthUser = Depends(User)):
+    """wait (seconds, max 25): long-poll until the job finishes or the wait ends.
+    On Cloud Run a container only gets CPU while a request is open, so the UI
+    keeps one of these open while LIME runs; that keeps the job progressing."""
     scan, _ = owned_scan(user, scan_id)
     st = lime_jobs.status(scan.image_path)
+    deadline = time.monotonic() + max(0.0, min(wait, 25.0))
+    while st["status"] in ("queued", "running") and time.monotonic() < deadline:
+        time.sleep(0.5)
+        st = lime_jobs.status(scan.image_path)
     if st["status"] == "done":
         st["labels"] = services.lime_summary(scan.image_path)
     return st

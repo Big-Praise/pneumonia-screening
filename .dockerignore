@@ -1,0 +1,17 @@
+# Only backend code goes into the image build context.
+.git
+.venv
+.claude
+web
+tests
+docs
+deploy
+sample_xrays
+uploads
+.streamlit
+app.db
+*.keras
+*.h5
+.env
+__pycache__
+.pytest_cache

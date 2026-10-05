@@ -105,7 +105,10 @@ def init_db(url: str | None = None) -> None:
         return
     is_sqlite = url.startswith("sqlite")
     # Streamlit reruns scripts on different threads; SQLite must allow that.
-    connect_args = {"check_same_thread": False} if is_sqlite else {}
+    # SQLite: Streamlit reruns on different threads. Postgres: hosted poolers
+    # (Neon, Supabase) use transaction pooling, which breaks psycopg's automatic
+    # server-side prepared statements, so turn those off.
+    connect_args = {"check_same_thread": False} if is_sqlite else {"prepare_threshold": None}
     # pool_pre_ping: hosted Postgres (Neon) closes idle connections; re-check before use.
     _engine = create_engine(url, connect_args=connect_args, pool_pre_ping=not is_sqlite)
     if is_sqlite:

@@ -46,10 +46,15 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "1") != "0"
 
 # Model file contract (docs/MODEL_INTERFACE.md): .keras preferred, .h5 accepted.
 MODEL_CANDIDATES = [BASE_DIR / "pneumonia_model.keras", BASE_DIR / "pneumonia_model.h5"]
-# TODO (Praise): in production set MODEL_HF_REPO (e.g. "Big-Praise/pneumonia-model") and
+# TODO (Praise): in production set MODEL_HF_REPO (e.g. "ZPraise/pneumonia-model") and
 # HF_TOKEN (read-only token) so the backend downloads the private model at startup.
 MODEL_HF_REPO = os.environ.get("MODEL_HF_REPO", "")
 MODEL_HF_FILENAME = os.environ.get("MODEL_HF_FILENAME", "pneumonia_model.keras")
+
+# Load the model before the server accepts requests (instead of in the
+# background). Needed on Cloud Run, which only gives the container CPU during
+# startup and while serving requests, so a background load would stall.
+MODEL_LOAD_BLOCKING = os.environ.get("MODEL_LOAD_BLOCKING", "0") == "1"
 
 # Upload limits (FR3 / FR13).
 MAX_UPLOAD_MB = 10

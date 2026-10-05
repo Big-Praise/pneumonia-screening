@@ -152,3 +152,29 @@ def test_data_endpoints_require_login(client):
     for method, url in [("get", "/api/dashboard"), ("get", "/api/patients"),
                         ("post", "/api/patients"), ("get", "/api/scans/1")]:
         assert getattr(client, method)(url).status_code == 401, url
+
+
+def test_blocking_model_load_ready_at_startup(monkeypatch):
+    """Cloud Run mode: the model is loaded before the first request is served."""
+    monkeypatch.setattr(config, "MODEL_LOAD_BLOCKING", True)
+    monkeypatch.setattr(config, "MODEL_CANDIDATES", [])
+    monkeypatch.setattr(config, "MODEL_HF_REPO", "")
+    monkeypatch.setattr(services, "model", services.ModelState())
+    import api.main as main
+    monkeypatch.setattr(main, "model", services.model)
+    with TestClient(app) as c:
+        assert c.get("/api/health").json()["model"] == "demo"   # no waiting needed
+
+
+def test_lime_long_poll_returns_when_done(client):
+    _register(client)
+    pid = client.post("/api/patients", json={"name": "Test Patient"}).json()["id"]
+    sid = client.post(f"/api/patients/{pid}/scans",
+                      files={"file": ("x.png", _xray_bytes(), "image/png")}).json()["id"]
+    client.post(f"/api/scans/{sid}/lime")
+    st = client.get(f"/api/scans/{sid}/lime?wait=25").json()   # held open until finished
+    for _ in range(5):
+        if st["status"] == "done":
+            break
+        st = client.get(f"/api/scans/{sid}/lime?wait=25").json()
+    assert st["status"] == "done" and "labels" in st

@@ -41,6 +41,14 @@ class ModelState:
         self.loading = False
         self._lock = threading.Lock()
 
+    def load_now(self) -> None:
+        """Synchronous load (see config.MODEL_LOAD_BLOCKING)."""
+        with self._lock:
+            if self.predictor is not None:
+                return
+            self.loading = True
+        self._load()
+
     def start_loading(self) -> None:
         with self._lock:
             if self.loading or self.predictor is not None:

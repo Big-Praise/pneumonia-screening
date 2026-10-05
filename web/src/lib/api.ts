@@ -85,7 +85,8 @@ export const api = {
   },
   scan: (id: number) => request<ScanDetail>(`/api/scans/${id}`),
   saveThreshold: (id: number, threshold: number) => request<Scan>(`/api/scans/${id}`, json("PATCH", { threshold })),
-  limeStatus: (id: number) => request<LimeStatus>(`/api/scans/${id}/lime`),
+  // wait > 0: long-poll (server holds up to `wait` s) — keeps the backend CPU awake on Cloud Run.
+  limeStatus: (id: number, wait = 0) => request<LimeStatus>(`/api/scans/${id}/lime${wait ? `?wait=${wait}` : ""}`),
   limeStart: (id: number) => request<LimeStatus>(`/api/scans/${id}/lime`, { method: "POST" }),
 };
 
