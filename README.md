@@ -221,3 +221,45 @@ explanations side by side.
 | DEMO MODE banner but you added the model | The file must be named exactly `pneumonia_model.keras` (or `.h5`) and be in this folder. Restart the app. |
 | LIME takes minutes | Expected on CPU (~1 min per scan). It runs once per scan, then loads from `uploads/lime/`. |
 | `Port 8501 is already in use` | Another copy is running. Close it, or add `--server.port 8502`. |
+
+## 11. New web app (Next.js + FastAPI) and going live
+
+v2.1 adds a custom web interface (`web/`, Next.js) backed by a FastAPI API (`api/`).
+The API reuses the same Python modules as the Streamlit app.
+
+**Live site:** https://pneumonia-screening.vercel.app (Vercel, free Hobby plan).
+The website only works while the backend is running on this PC (tunnel mode, below).
+
+### Tunnel mode ($0): the backend runs on this PC
+```
+Browser -> Vercel (website) -> Cloudflare quick tunnel -> this PC: FastAPI + model + app.db
+```
+Patient data and X-rays never leave this machine. To start (and update the site):
+```powershell
+cd C:\Users\USER\Downloads\pneumonia-v2-foundation\pneumonia-v2
+.venv\Scripts\python serve_public.py --deploy
+```
+- Keep that window open while the site is in use. Ctrl+C stops it.
+- Quick-tunnel URLs change on every start. `--deploy` rebuilds the Vercel site with
+  the new URL (about 1 minute). It needs `vercel login` done once.
+- The first run creates `.env.backend` (git-ignored), which holds a random session
+  key and the **registration code**. Open the file to read the code. People need it
+  to create an account. Change it there and restart to rotate it.
+- `cloudflared` lives in `tools/` (git-ignored). Download `cloudflared-windows-amd64.exe`
+  from Cloudflare's GitHub releases and save it as `tools/cloudflared.exe`.
+
+### Local development
+```powershell
+# terminal 1 (API, http://127.0.0.1:8000)
+$env:COOKIE_SECURE="0"; .venv\Scripts\python -m uvicorn api.main:app --port 8000
+# terminal 2 (web, http://localhost:3000)
+cd web; npm install; npm run dev
+```
+
+### Later: always-on hosting (when a card is available)
+The backend is ready for **Google Cloud Run**: `Dockerfile` + `.dockerignore`, request-based
+billing, max instances 1, 2 GiB / 2 vCPU. Deploy it from GitHub in the Cloud Console, with
+env vars `DATABASE_URL` (Neon, pooled), `JWT_SECRET`, `REGISTRATION_CODE`, `HF_TOKEN`
+(read) and `MODEL_HF_REPO=ZPraise/pneumonia-model` (the private model repo). Then redeploy
+Vercel with `BACKEND_URL=<Cloud Run URL>`:
+`cd web; vercel deploy --prod --build-env BACKEND_URL=<url> --env BACKEND_URL=<url>`.
