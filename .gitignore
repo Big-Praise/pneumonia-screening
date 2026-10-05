@@ -14,3 +14,7 @@ pneumonia_model.h5
 
 .env
 .streamlit/secrets.toml
+
+# Local binaries (cloudflared) and local backend secrets
+tools/
+.env.backend
