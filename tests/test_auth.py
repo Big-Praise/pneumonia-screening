@@ -54,3 +54,16 @@ def test_registration_code_enforced(monkeypatch):
 def test_auth_user_carries_no_hash():
     user = auth.register_user("dr.ade", "s3cure-pass")
     assert not any("hash" in f for f in user.__dataclass_fields__)
+
+
+def test_change_password():
+    user = auth.register_user("dr.ade", "s3cure-pass")
+    with pytest.raises(auth.AuthError, match="incorrect"):
+        auth.change_password(user.id, "wrong-pass", "new-pass-123")
+    with pytest.raises(auth.AuthError, match="different"):
+        auth.change_password(user.id, "s3cure-pass", "s3cure-pass")
+    with pytest.raises(auth.AuthError):
+        auth.change_password(user.id, "s3cure-pass", "short")
+    auth.change_password(user.id, "s3cure-pass", "new-pass-123")
+    assert auth.authenticate("dr.ade", "s3cure-pass") is None
+    assert auth.authenticate("dr.ade", "new-pass-123") is not None

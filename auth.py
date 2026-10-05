@@ -10,6 +10,7 @@ Decisions:
   no cookie-signing secret is needed. If persistent "remember me" cookies are
   added later, that will need a secret — see TODO in config.py.
 """
+import hashlib
 import hmac
 import re
 from dataclasses import dataclass
@@ -106,4 +107,23 @@ def authenticate(username: str, password: str) -> AuthUser | None:
             return None
         if not verify_password(password, user.password_hash):
             return None
+        return AuthUser(user.id, user.username, user.full_name)
+
+
+def password_fingerprint(password_hash: str) -> str:
+    """Short, non-reversible tag of the current password hash. Sessions embed it,
+    so changing the password invalidates every session issued before the change."""
+    return hashlib.sha256(password_hash.encode("ascii")).hexdigest()[:16]
+
+
+def change_password(user_id: int, current_password: str, new_password: str) -> AuthUser:
+    """Verify the current password, then store a new bcrypt hash."""
+    validate_password(new_password)
+    if hmac.compare_digest(current_password.encode("utf-8"), new_password.encode("utf-8")):
+        raise AuthError("The new password must be different from the current one.")
+    with get_session() as s:
+        user = s.get(User, user_id)
+        if user is None or not verify_password(current_password, user.password_hash):
+            raise AuthError("Current password is incorrect.")
+        user.password_hash = hash_password(new_password)
         return AuthUser(user.id, user.username, user.full_name)

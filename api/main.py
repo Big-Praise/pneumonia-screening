@@ -188,6 +188,26 @@ def logout(response: Response):
     return {"ok": True}
 
 
+class PasswordIn(BaseModel):
+    current_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
+@app.post("/api/auth/password")
+def change_password(body: PasswordIn, response: Response, user: auth.AuthUser = Depends(User)):
+    """Change password. Other devices are logged out; this one gets a fresh session."""
+    security.throttle.check(user.username)  # wrong "current password" guesses count as failures
+    try:
+        updated = auth.change_password(user.id, body.current_password, body.new_password)
+    except auth.AuthError as e:
+        if "incorrect" in str(e):
+            security.throttle.failed(user.username)
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from None
+    security.throttle.succeeded(user.username)
+    security.issue(response, updated)
+    return user_json(updated)
+
+
 @app.get("/api/auth/me")
 def me(user: auth.AuthUser = Depends(User)):
     return user_json(user)

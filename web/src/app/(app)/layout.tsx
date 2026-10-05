@@ -12,6 +12,7 @@ const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "home" },
   { href: "/scan/new", label: "New scan", icon: "scan" },
   { href: "/patients", label: "Patients", icon: "users" },
+  { href: "/account", label: "Account", icon: "user" },
 ];
 
 /** Logged-in shell: auth gate, sidebar, always-on disclaimer, model status. */

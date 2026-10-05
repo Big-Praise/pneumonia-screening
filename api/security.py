@@ -32,8 +32,13 @@ USING_EPHEMERAL_SECRET = not config.JWT_SECRET
 
 def issue(response: Response, user: auth.AuthUser) -> None:
     now = datetime.now(timezone.utc)
+    with get_session() as s:
+        pwv = auth.password_fingerprint(s.get(User, user.id).password_hash)
     token = jwt.encode(
-        {"sub": str(user.id), "iat": now, "exp": now + timedelta(hours=config.SESSION_HOURS)},
+        # pwv ties the session to the current password: a password change logs
+        # out every other device (their tokens carry the old fingerprint).
+        {"sub": str(user.id), "pwv": pwv, "iat": now,
+         "exp": now + timedelta(hours=config.SESSION_HOURS)},
         _SECRET, algorithm=ALGO,
     )
     response.set_cookie(
@@ -59,8 +64,8 @@ def current_user(session: str | None = Cookie(default=None, alias=COOKIE)) -> au
         raise unauthorized from None
     with get_session() as s:
         user = s.get(User, user_id)
-        if user is None:
-            raise unauthorized
+        if user is None or payload.get("pwv") != auth.password_fingerprint(user.password_hash):
+            raise unauthorized  # deleted user, or password changed since this token was issued
         return auth.AuthUser(user.id, user.username, user.full_name)
 
 

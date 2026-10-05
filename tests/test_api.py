@@ -221,3 +221,22 @@ def test_edit_and_delete_endpoints(client):
     assert client.get(f"/api/scans/{sids[1]}").status_code == 404
     assert not blobstore.exists(path1)
     assert client.get("/api/dashboard").json()["scans"] == 0
+
+
+def test_change_password_logs_out_other_sessions(client):
+    _register(client)                                   # device 1
+    other = TestClient(app)                             # device 2, same account
+    assert other.post("/api/auth/login", json={"username": "dr.a", "password": "password-a"}).status_code == 200
+    assert other.get("/api/auth/me").status_code == 200
+
+    bad = client.post("/api/auth/password", json={"current_password": "nope-nope", "new_password": "brand-new-pass"})
+    assert bad.status_code == 400 and "incorrect" in bad.json()["detail"]
+    ok = client.post("/api/auth/password", json={"current_password": "password-a", "new_password": "brand-new-pass"})
+    assert ok.status_code == 200
+
+    assert client.get("/api/auth/me").status_code == 200      # this device: fresh cookie
+    assert other.get("/api/auth/me").status_code == 401       # other device: logged out
+    client.post("/api/auth/logout")
+    assert client.post("/api/auth/login", json={"username": "dr.a", "password": "password-a"}).status_code == 401
+    assert client.post("/api/auth/login", json={"username": "dr.a", "password": "brand-new-pass"}).status_code == 200
+    assert client.post("/api/auth/password", json={"current_password": "x", "new_password": "y"}).status_code in (400, 401)

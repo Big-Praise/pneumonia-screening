@@ -79,6 +79,8 @@ export const api = {
   register: (b: { username: string; password: string; full_name: string; registration_code: string }) =>
     request<User>("/api/auth/register", json("POST", b)),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  changePassword: (current_password: string, new_password: string) =>
+    request<User>("/api/auth/password", json("POST", { current_password, new_password })),
   dashboard: () => request<Dashboard>("/api/dashboard"),
   patients: () => request<PatientSummary[]>("/api/patients"),
   createPatient: (b: { name: string; age: number | null; sex: string | null; note: string | null }) =>
