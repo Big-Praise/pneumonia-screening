@@ -276,3 +276,30 @@ Vercel with `BACKEND_URL=<Cloud Run URL>`:
   ngrok's free-tier warning page never breaks the app.
 - Free plan limits: about 1 GB/month of traffic, and only one ngrok agent online at a time.
 - Force the old Cloudflare quick tunnel with `serve_public.py --cloudflare --deploy`.
+
+## 12. Team and Acknowledgements
+
+**Group 7 — NITDA Data Science Advanced (Machine Learning)**
+
+- Okoli Praise Daniel (Group Leader)
+- Fatimat Ismaila(Assistant)
+- Faruk Muhammed
+- Muhammad Abdulazeez
+- Sefinatu Abdulai
+- Kammaluchuckwu Amah
+
+This project was carried out as part of the NITDA Data Science Advanced
+cohort, in collaboration with the **National Centre for Artificial
+Intelligence and Robotics (NCAIR)**, Abuja.
+
+We gratefully acknowledge the guidance of our course facilitators,
+**Stephen Ayuba** and **Victor**, whose instruction and support made this
+work possible.
+
+## 13. Project Documents
+
+The project slides and research report are included in this repository under
+the `presentation/` folder:
+
+- `presentation/Group7_Pneumonia_Slides.pptx` — final presentation slides
+- `presentation/Group7_Pneumonia_Report.docx` — full research report
